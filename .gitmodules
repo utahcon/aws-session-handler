@@ -1,0 +1,3 @@
+[submodule "tamperdav"]
+	path = tamperdav
+	url = git@github.com:Tampermonkey/tamperdav

@@ -1,0 +1,66 @@
+#!/bin/bash
+
+trap cleanup 1 2 3 6
+
+PROJECT_NAME=${PWD##*/}
+
+declare -A PROJECT_SRC_FILES
+
+cleanup() {
+  # make sure to stop the dav server
+  echo -e "\n"
+  sudo umount .dav
+  rm -rf .dav
+  echo "done"
+  exit 1
+}
+
+make_md5sums() {
+  echo -n "Getting checksums"
+  while read file; do
+    inode=$(stat -c "%i" "src/$file")
+    PROJECT_SRC_FILES[$inode]=$(md5sum "src/$file" | cut -d ' ' -f1)
+  done < <(ls src)
+  echo " ... done"
+}
+
+check_md5sums() {
+  for inode in "${!PROJECT_SRC_FILES[@]}"; do
+    stored_md5sum=${PROJECT_SRC_FILES["$inode"]}
+    # resolve inode in src
+    file=$(find ./src -xdev -inum $inode)
+    current_md5sum=$(md5sum "$file" | cut -d ' ' -f1)
+    if [ $stored_md5sum != $current_md5sum ]; then
+      echo "$file has been changed"
+    fi
+  done
+  sleep 1s
+}
+
+# Ensure git submodules are installed
+git submodule init
+git submodule update
+
+# run the DAV server
+tamperdav/tamperdav.sh --no-auth-warning --no-auth-warning &
+sleep 1
+# Find our files
+#(
+#  cd tamperdav
+#  node find_script_in_meta.js --name="${PROJECT_NAME}"
+#)
+
+# mount the server
+if [ ! -d ".dav" ]; then mkdir .dav; fi
+echo "use_locks 0" > .davconf
+echo "" | mount -t davfs http://localhost:7000 .dav -o users -o conf=.davconf -o username= 2> /dev/null
+if [ $? -ne 0 ]; then
+  echo "" | sudo mount -t davfs http://localhost:7000 .dav -o users -o conf=.davconf -o username= 2>&1 > /dev/null
+fi
+
+# watch for changes
+make_md5sums
+
+while true; do
+  check_md5sums
+done
